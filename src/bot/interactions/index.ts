@@ -1,0 +1,44 @@
+import { ButtonHandler, SelectMenuHandler } from '../discord-client';
+import { 
+  confirmLabelSelectionHandler, 
+  cancelLabelSelectionHandler, 
+  labelSelectMenuHandler,
+  refreshLabelsHandler 
+} from './label-selection';
+import {
+  viewSubscriptionDetailsHandler,
+  removeSubscriptionSelectHandler,
+  confirmSubscriptionRemovalHandler,
+  cancelSubscriptionRemovalHandler,
+  addMoreLabelsHandler
+} from './subscription-management';
+
+// Export all button handlers
+export const buttonHandlers: ButtonHandler[] = [
+  confirmLabelSelectionHandler,
+  cancelLabelSelectionHandler,
+  refreshLabelsHandler,
+  viewSubscriptionDetailsHandler,
+  confirmSubscriptionRemovalHandler,
+  cancelSubscriptionRemovalHandler,
+  addMoreLabelsHandler
+];
+
+// Export all select menu handlers
+export const selectMenuHandlers: SelectMenuHandler[] = [
+  labelSelectMenuHandler,
+  removeSubscriptionSelectHandler
+];
+
+// Export individual handlers for direct access if needed
+export {
+  confirmLabelSelectionHandler,
+  cancelLabelSelectionHandler,
+  labelSelectMenuHandler,
+  refreshLabelsHandler,
+  viewSubscriptionDetailsHandler,
+  removeSubscriptionSelectHandler,
+  confirmSubscriptionRemovalHandler,
+  cancelSubscriptionRemovalHandler,
+  addMoreLabelsHandler
+};
