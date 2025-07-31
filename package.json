@@ -1,0 +1,46 @@
+{
+  "name": "github-label-notifier",
+  "version": "1.0.0",
+  "description": "A Discord bot that notifies users when GitHub issues are labeled with their monitored labels",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "github",
+    "notifications",
+    "labels"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/rest": "^22.0.0",
+    "discord.js": "^14.21.0",
+    "dotenv": "^17.2.1",
+    "sqlite3": "^5.1.7",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.32.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.1.0",
+    "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
+    "eslint": "^9.32.0",
+    "jest": "^30.0.5",
+    "prettier": "^3.6.2",
+    "ts-jest": "^29.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
