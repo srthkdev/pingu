@@ -16,6 +16,12 @@ import {
   subscriptionsPaginationHandler,
   refreshSubscriptionsHandler
 } from './subscription-management';
+import {
+  confirmAuthRemovalHandler,
+  cancelAuthRemovalHandler,
+  removeAuthFromStatusHandler,
+  startAuthSetupHandler
+} from './auth-management';
 
 // Export all button handlers
 export const buttonHandlers: ButtonHandler[] = [
@@ -29,7 +35,11 @@ export const buttonHandlers: ButtonHandler[] = [
   manageSubscriptionsHandler,
   refreshSubscriptionDetailsHandler,
   subscriptionsPaginationHandler,
-  refreshSubscriptionsHandler
+  refreshSubscriptionsHandler,
+  confirmAuthRemovalHandler,
+  cancelAuthRemovalHandler,
+  removeAuthFromStatusHandler,
+  startAuthSetupHandler
 ];
 
 // Export all select menu handlers
@@ -52,5 +62,9 @@ export {
   manageSubscriptionsHandler,
   refreshSubscriptionDetailsHandler,
   subscriptionsPaginationHandler,
-  refreshSubscriptionsHandler
+  refreshSubscriptionsHandler,
+  confirmAuthRemovalHandler,
+  cancelAuthRemovalHandler,
+  removeAuthFromStatusHandler,
+  startAuthSetupHandler
 };
