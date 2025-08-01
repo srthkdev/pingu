@@ -1,5 +1,7 @@
 import { Client, GatewayIntentBits, Collection, REST, Routes, SlashCommandBuilder, SlashCommandSubcommandsOnlyBuilder, SlashCommandOptionsOnlyBuilder } from 'discord.js';
 import { ButtonInteraction, StringSelectMenuInteraction, ChatInputCommandInteraction } from 'discord.js';
+import { errorHandler } from '../utils/error-handler';
+import { logger } from '../utils/logger';
 
 export interface Command {
   data: SlashCommandBuilder | SlashCommandSubcommandsOnlyBuilder | SlashCommandOptionsOnlyBuilder;
@@ -42,18 +44,28 @@ export class DiscordClient {
     this.buttonHandlers = new Collection();
     this.selectMenuHandlers = new Collection();
 
+    // Set up error handler with Discord client
+    errorHandler.setDiscordClient(this.client);
+
     this.setupEventHandlers();
   }
 
   private setupEventHandlers(): void {
     // Bot ready event
     this.client.once('ready', () => {
-      console.log(`Discord bot logged in as ${this.client.user?.tag}`);
+      logger.info(`Discord bot logged in as ${this.client.user?.tag}`);
     });
 
     // Handle interactions
     this.client.on('interactionCreate', async (interaction) => {
       try {
+        logger.logDiscordInteraction(
+          interaction.type.toString(),
+          interaction.user.id,
+          interaction.isCommand() ? interaction.commandName : undefined,
+          interaction.isButton() || interaction.isStringSelectMenu() ? interaction.customId : undefined
+        );
+
         if (interaction.isChatInputCommand()) {
           await this.handleSlashCommand(interaction);
         } else if (interaction.isButton()) {
@@ -62,28 +74,35 @@ export class DiscordClient {
           await this.handleSelectMenuInteraction(interaction);
         }
       } catch (error) {
-        console.error('Error handling interaction:', error);
-        
-        const errorMessage = 'An error occurred while processing your request. Please try again later.';
-        
-        if (interaction.isRepliable()) {
-          if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ content: errorMessage, ephemeral: true });
-          } else {
-            await interaction.reply({ content: errorMessage, ephemeral: true });
-          }
+        if (interaction.isRepliable() && 
+            (interaction.isChatInputCommand() || interaction.isButton() || interaction.isStringSelectMenu())) {
+          await errorHandler.handleInteractionError(
+            error instanceof Error ? error : new Error(String(error)),
+            interaction,
+            {
+              interactionType: interaction.type,
+              userId: interaction.user.id,
+              guildId: interaction.guildId
+            }
+          );
+        } else {
+          logger.error('Non-repliable or unsupported interaction error', {
+            interactionType: interaction.type,
+            userId: interaction.user.id,
+            error: error instanceof Error ? error.message : String(error)
+          });
         }
       }
     });
 
     // Handle errors
     this.client.on('error', (error) => {
-      console.error('Discord client error:', error);
+      errorHandler.handleError(error, { component: 'DiscordClient' });
     });
 
     // Handle warnings
     this.client.on('warn', (warning) => {
-      console.warn('Discord client warning:', warning);
+      logger.warn('Discord client warning', { warning });
     });
   }
 
@@ -91,7 +110,10 @@ export class DiscordClient {
     const command = this.commands.get(interaction.commandName);
     
     if (!command) {
-      console.error(`No command matching ${interaction.commandName} was found.`);
+      logger.error(`No command matching ${interaction.commandName} was found`, {
+        commandName: interaction.commandName,
+        userId: interaction.user.id
+      });
       await interaction.reply({ 
         content: 'Unknown command. Please try again.', 
         ephemeral: true 
@@ -118,7 +140,10 @@ export class DiscordClient {
     }
     
     if (!handler) {
-      console.error(`No button handler matching ${interaction.customId} was found.`);
+      logger.error(`No button handler matching ${interaction.customId} was found`, {
+        customId: interaction.customId,
+        userId: interaction.user.id
+      });
       await interaction.reply({ 
         content: 'This button is no longer available.', 
         ephemeral: true 
@@ -133,7 +158,10 @@ export class DiscordClient {
     const handler = this.selectMenuHandlers.get(interaction.customId);
     
     if (!handler) {
-      console.error(`No select menu handler matching ${interaction.customId} was found.`);
+      logger.error(`No select menu handler matching ${interaction.customId} was found`, {
+        customId: interaction.customId,
+        userId: interaction.user.id
+      });
       await interaction.reply({ 
         content: 'This menu is no longer available.', 
         ephemeral: true 
@@ -158,7 +186,7 @@ export class DiscordClient {
 
   public async registerCommands(): Promise<void> {
     try {
-      console.log('Started refreshing application (/) commands.');
+      logger.info('Started refreshing application (/) commands');
 
       const rest = new REST().setToken(this.token);
       const commandData = this.commands.map(command => command.data.toJSON());
@@ -168,9 +196,9 @@ export class DiscordClient {
         { body: commandData }
       );
 
-      console.log(`Successfully reloaded ${commandData.length} application (/) commands.`);
+      logger.info(`Successfully reloaded ${commandData.length} application (/) commands`);
     } catch (error) {
-      console.error('Error registering commands:', error);
+      logger.error('Error registering commands', {}, error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
   }
@@ -178,8 +206,9 @@ export class DiscordClient {
   public async login(): Promise<void> {
     try {
       await this.client.login(this.token);
+      logger.info('Successfully logged in to Discord');
     } catch (error) {
-      console.error('Failed to login to Discord:', error);
+      logger.error('Failed to login to Discord', {}, error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
   }

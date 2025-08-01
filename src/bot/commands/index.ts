@@ -3,13 +3,15 @@ import { monitorCommand } from './monitor';
 import { subscriptionsCommand } from './subscriptions';
 import { unsubscribeCommand } from './unsubscribe';
 import { authCommand } from './auth';
+import { diagnosticsCommand } from './diagnostics';
 
 // Export all commands for easy registration
 export const commands: Command[] = [
   monitorCommand,
   subscriptionsCommand,
   unsubscribeCommand,
-  authCommand
+  authCommand,
+  diagnosticsCommand
 ];
 
 // Export individual commands for direct access if needed
@@ -17,5 +19,6 @@ export {
   monitorCommand,
   subscriptionsCommand,
   unsubscribeCommand,
-  authCommand
+  authCommand,
+  diagnosticsCommand
 };
