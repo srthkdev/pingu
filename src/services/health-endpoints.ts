@@ -189,9 +189,9 @@ export class HealthEndpoints {
       const packageJson = require('../../package.json');
       
       res.status(200).json({
-        name: packageJson.name || 'github-label-notifier',
+        name: packageJson.name || 'pingu',
         version: packageJson.version || '1.0.0',
-        description: packageJson.description || 'GitHub Label Notifier Discord Bot',
+        description: packageJson.description || 'Pingu Discord Bot',
         uptime: healthMonitor.getUptimeString(),
         environment: process.env.NODE_ENV || 'development',
         nodeVersion: process.version,

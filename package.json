@@ -1,7 +1,7 @@
 {
-  "name": "github-label-notifier",
+  "name": "pingu",
   "version": "1.0.0",
-  "description": "A Discord bot that notifies users when GitHub issues are labeled with their monitored labels",
+  "description": "Pingu - A Discord bot that notifies users when GitHub issues are labeled with their monitored labels",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

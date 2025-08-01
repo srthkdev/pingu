@@ -1,6 +1,6 @@
-# GitHub Label Notifier
+# Pingu
 
-A Discord bot that notifies users when issues with specific labels are created or updated in GitHub repositories.
+Pingu is a Discord bot that notifies users when issues with specific labels are created or updated in GitHub repositories.
 
 ## Features
 
@@ -42,7 +42,7 @@ The application follows a clean architecture pattern with:
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd github-label-notifier
+cd pingu
 ```
 
 2. Install dependencies:
@@ -173,7 +173,7 @@ npm test -- --testPathPatterns=models
 
 ```env
 # Database
-DATABASE_PATH=./data/github-label-notifier.db
+DATABASE_PATH=./data/pingu.db
 
 # Discord
 DISCORD_TOKEN=your-discord-bot-token

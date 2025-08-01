@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  pingu-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: pingu-dev
+    restart: "no"
+    
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+      - LOG_TO_FILE=false
+      - DATABASE_PATH=/app/data/pingu-dev.db
+    
+    env_file:
+      - .env.development
+    
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    
+    volumes:
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw
+    
+    # Override resource limits for development
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'

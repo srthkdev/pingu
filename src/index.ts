@@ -1,8 +1,9 @@
-import dotenv from 'dotenv';
+import { config } from './config';
+import { ConfigValidator } from './config/validator';
 import { DiscordClient } from './bot/discord-client';
 import { commands } from './bot/commands';
 import { buttonHandlers, selectMenuHandlers } from './bot/interactions';
-import { DatabaseManager, createDatabaseConfig } from './database/manager';
+import { DatabaseManager } from './database/manager';
 import { NotificationService } from './services/notification-service';
 import { SubscriptionManager } from './services/subscription-manager';
 import { WebhookHandler } from './handlers/webhook-handler';
@@ -13,40 +14,30 @@ import { logger } from './utils/logger';
 import { healthMonitor } from './utils/health-monitor';
 import { HealthEndpoints } from './services/health-endpoints';
 
-// Load environment variables
-dotenv.config();
-
 async function main() {
   const startTime = Date.now();
-  logger.info('GitHub Label Notifier Bot starting...');
+  logger.info('Pingu Bot starting...');
   
-  // Log configuration (sanitized)
-  logger.logConfiguration({
-    NODE_ENV: process.env.NODE_ENV,
-    LOG_LEVEL: process.env.LOG_LEVEL,
-    LOG_TO_FILE: process.env.LOG_TO_FILE,
-    WEBHOOK_BASE_URL: process.env.WEBHOOK_BASE_URL,
-    DATABASE_PATH: process.env.DATABASE_PATH
-  });
+  // Validate configuration
+  const appConfig = config.getConfig();
+  const validation = ConfigValidator.validate(appConfig);
   
-  // Validate required environment variables
-  const discordToken = process.env.DISCORD_TOKEN;
-  const discordClientId = process.env.DISCORD_CLIENT_ID;
-  
-  if (!discordToken) {
-    throw new Error('DISCORD_TOKEN environment variable is required');
+  if (!validation.isValid) {
+    logger.error('Configuration validation failed:', { errors: validation.errors });
+    throw new Error(`Configuration validation failed:\n${validation.errors.join('\n')}`);
   }
   
-  if (!discordClientId) {
-    throw new Error('DISCORD_CLIENT_ID environment variable is required');
+  if (validation.warnings.length > 0) {
+    logger.warn('Configuration warnings:', { warnings: validation.warnings });
   }
+  
+  // Log sanitized configuration
+  config.logSanitizedConfig();
   
   // Initialize database first
   logger.info('Initializing database...');
   const dbStartTime = Date.now();
-  const environment = process.env.NODE_ENV || 'development';
-  const dbConfig = createDatabaseConfig(environment);
-  const dbManager = DatabaseManager.getInstance(dbConfig);
+  const dbManager = DatabaseManager.getInstance();
   
   try {
     await dbManager.initialize();
@@ -58,7 +49,7 @@ async function main() {
 
   // Initialize Discord bot client
   logger.info('Initializing Discord bot client...');
-  const discordClient = new DiscordClient(discordToken, discordClientId);
+  const discordClient = new DiscordClient(appConfig.discord.token, appConfig.discord.clientId);
   
   // Register all commands
   logger.info('Registering commands...');
@@ -81,7 +72,7 @@ async function main() {
 
   // Initialize services
   logger.info('Initializing services...');
-  const githubService = new GitHubService(process.env.GITHUB_TOKEN);
+  const githubService = new GitHubService(appConfig.github.token);
   const subscriptionManager = new SubscriptionManager(dbManager.getConnection());
   const notificationService = new NotificationService(discordClient.getClient());
   
@@ -93,7 +84,7 @@ async function main() {
   const webhookManager = new WebhookManager(
     dbManager.getConnection(),
     githubService,
-    process.env.WEBHOOK_BASE_URL
+    appConfig.server.baseUrl
   );
   
   // Connect webhook manager to subscription manager (avoid circular dependency)
@@ -104,7 +95,7 @@ async function main() {
   const webhookServer = new WebhookServer(webhookHandler);
   
   // Initialize health endpoints server
-  const healthEndpoints = new HealthEndpoints(parseInt(process.env.HEALTH_PORT || '3001', 10));
+  const healthEndpoints = new HealthEndpoints(appConfig.server.healthPort);
   
   // Register commands with Discord API
   await discordClient.registerCommands();
@@ -132,8 +123,22 @@ async function main() {
   });
   
   // Graceful shutdown handling
-  const shutdown = async () => {
-    logger.info('Shutting down bot...');
+  let isShuttingDown = false;
+  
+  const shutdown = async (signal: string) => {
+    if (isShuttingDown) {
+      logger.warn(`Received ${signal} during shutdown, forcing exit...`);
+      process.exit(1);
+    }
+    
+    isShuttingDown = true;
+    logger.info(`Received ${signal}, initiating graceful shutdown...`);
+    
+    // Set a timeout for forced shutdown
+    const forceShutdownTimeout = setTimeout(() => {
+      logger.error('Graceful shutdown timed out, forcing exit');
+      process.exit(1);
+    }, 30000); // 30 seconds timeout
     
     try {
       // Stop notification service queue processor
@@ -175,12 +180,22 @@ async function main() {
       logger.logShutdown('Database', false, error instanceof Error ? error : new Error(String(error)));
     }
     
+    // Clear the force shutdown timeout
+    clearTimeout(forceShutdownTimeout);
+    
     logger.info('Bot shutdown complete');
     process.exit(0);
   };
   
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  // Handle various shutdown signals
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGQUIT', () => shutdown('SIGQUIT'));
+  
+  // Handle process cleanup on exit
+  process.on('exit', (code) => {
+    logger.info(`Process exiting with code ${code}`);
+  });
 }
 
 // Handle unhandled promise rejections
