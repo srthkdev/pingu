@@ -3,6 +3,10 @@ import { DiscordClient } from './bot/discord-client';
 import { commands } from './bot/commands';
 import { buttonHandlers, selectMenuHandlers } from './bot/interactions';
 import { DatabaseManager, createDatabaseConfig } from './database/manager';
+import { NotificationService } from './services/notification-service';
+import { SubscriptionManager } from './services/subscription-manager';
+import { WebhookHandler } from './handlers/webhook-handler';
+import { WebhookServer } from './services/webhook-server';
 
 // Load environment variables
 dotenv.config();
@@ -22,6 +26,14 @@ async function main() {
     throw new Error('DISCORD_CLIENT_ID environment variable is required');
   }
   
+  // Initialize database first
+  console.log('Initializing database...');
+  const environment = process.env.NODE_ENV || 'development';
+  const dbConfig = createDatabaseConfig(environment);
+  const dbManager = DatabaseManager.getInstance(dbConfig);
+  await dbManager.initialize();
+  console.log('Database initialized successfully');
+
   // Initialize Discord bot client
   console.log('Initializing Discord bot client...');
   const discordClient = new DiscordClient(discordToken, discordClientId);
@@ -44,14 +56,15 @@ async function main() {
     discordClient.addSelectMenuHandler(handler);
     console.log(`Registered select menu handler: ${handler.customId}`);
   });
+
+  // Initialize services
+  console.log('Initializing services...');
+  const subscriptionManager = new SubscriptionManager(dbManager.getConnection());
+  const notificationService = new NotificationService(discordClient.getClient());
   
-  // Initialize database
-  console.log('Initializing database...');
-  const environment = process.env.NODE_ENV || 'development';
-  const dbConfig = createDatabaseConfig(environment);
-  const dbManager = DatabaseManager.getInstance(dbConfig);
-  await dbManager.initialize();
-  console.log('Database initialized successfully');
+  // Initialize webhook handler and server
+  const webhookHandler = new WebhookHandler(subscriptionManager, notificationService);
+  const webhookServer = new WebhookServer(webhookHandler);
   
   // Register commands with Discord API
   await discordClient.registerCommands();
@@ -60,15 +73,28 @@ async function main() {
   console.log('Connecting to Discord...');
   await discordClient.login();
   
-  // TODO: Start webhook server
+  // Start webhook server
+  console.log('Starting webhook server...');
+  await webhookServer.start();
   
-  console.log('Bot setup complete - Discord bot is now online!');
+  console.log('Bot setup complete - Discord bot and webhook server are now online!');
   
   // Graceful shutdown handling
   const shutdown = async () => {
     console.log('Shutting down bot...');
+    
+    // Stop notification service queue processor
+    notificationService.stopQueueProcessor();
+    
+    // Stop webhook server
+    await webhookServer.stop();
+    
+    // Disconnect Discord client
     await discordClient.destroy();
+    
+    // Close database connection
     await dbManager.close();
+    
     process.exit(0);
   };
   

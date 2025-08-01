@@ -73,3 +73,54 @@ export interface UpdateRateLimitInput {
   remainingRequests?: number | undefined;
   resetTime?: Date | undefined;
 }
+
+// GitHub webhook and notification types
+export interface GitHubIssueEvent {
+  action: 'opened' | 'labeled' | 'unlabeled' | 'closed' | 'reopened';
+  issue: {
+    id: number;
+    number: number;
+    title: string;
+    body: string;
+    html_url: string;
+    user: {
+      login: string;
+      avatar_url: string;
+    };
+    labels: Array<{
+      id: number;
+      name: string;
+      color: string;
+      description?: string;
+    }>;
+    created_at: string;
+    updated_at: string;
+  };
+  repository: {
+    id: number;
+    name: string;
+    full_name: string;
+    owner: {
+      login: string;
+    };
+    html_url: string;
+  };
+  sender: {
+    login: string;
+  };
+}
+
+export interface GitHubWebhookPayload {
+  zen?: string; // Ping event
+  hook_id?: number; // Ping event
+  issue?: GitHubIssueEvent['issue'];
+  action?: GitHubIssueEvent['action'];
+  repository?: GitHubIssueEvent['repository'];
+  sender?: GitHubIssueEvent['sender'];
+  label?: {
+    id: number;
+    name: string;
+    color: string;
+    description?: string;
+  };
+}
