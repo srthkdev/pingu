@@ -2,11 +2,19 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionR
 import { Command } from '../discord-client';
 import { DatabaseManager } from '../../database/manager';
 import { SubscriptionManager } from '../../services/subscription-manager';
+import { UserRepository } from '../../models/user-repository';
 
 export const subscriptionsCommand: Command = {
   data: new SlashCommandBuilder()
     .setName('subscriptions')
-    .setDescription('View your current GitHub repository label subscriptions'),
+    .setDescription('View your current GitHub repository label subscriptions')
+    .addIntegerOption(option =>
+      option
+        .setName('page')
+        .setDescription('Page number to view (default: 1)')
+        .setMinValue(1)
+        .setRequired(false)
+    ),
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     // Defer reply to allow for database queries
@@ -15,6 +23,13 @@ export const subscriptionsCommand: Command = {
     try {
       const db = DatabaseManager.getInstance();
       const subscriptionManager = new SubscriptionManager(db.getConnection());
+      const userRepo = new UserRepository(db.getConnection());
+      
+      // Ensure user exists in database
+      let user = await userRepo.findById(interaction.user.id);
+      if (!user) {
+        user = await userRepo.create({ id: interaction.user.id });
+      }
       
       const subscriptionSummary = await subscriptionManager.getUserSubscriptions(interaction.user.id);
       
@@ -36,6 +51,16 @@ export const subscriptionsCommand: Command = {
         return;
       }
 
+      // Pagination settings
+      const itemsPerPage = 8; // Reduced to leave room for pagination buttons
+      const requestedPage = interaction.options.getInteger('page') || 1;
+      const totalPages = Math.ceil(subscriptionSummary.subscriptionsByRepository.length / itemsPerPage);
+      const currentPage = Math.min(Math.max(1, requestedPage), totalPages);
+      
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      const endIndex = startIndex + itemsPerPage;
+      const repositoriesToShow = subscriptionSummary.subscriptionsByRepository.slice(startIndex, endIndex);
+
       // Create summary embed
       const embed = new EmbedBuilder()
         .setTitle('📋 Your Subscriptions')
@@ -43,47 +68,87 @@ export const subscriptionsCommand: Command = {
         .setColor(0x0099FF)
         .setTimestamp();
 
-      // Add overview of repositories (limit to first 10 to avoid embed limits)
-      const repositoriesToShow = subscriptionSummary.subscriptionsByRepository.slice(0, 10);
-      
+      // Add repository information
       for (const { repository, subscription } of repositoriesToShow) {
         const labelText = subscription.labels.length > 5 
           ? `${subscription.labels.slice(0, 5).map(label => `\`${label}\``).join(', ')} and ${subscription.labels.length - 5} more`
           : subscription.labels.map(label => `\`${label}\``).join(', ');
           
+        const createdAt = Math.floor(subscription.createdAt.getTime() / 1000);
+        
         embed.addFields({
           name: `🔗 ${repository.owner}/${repository.name}`,
-          value: `**Labels:** ${labelText}`,
+          value: `**Labels:** ${labelText}\n**Created:** <t:${createdAt}:R>`,
           inline: false
         });
       }
 
-      // Add note if there are more repositories
-      if (subscriptionSummary.subscriptionsByRepository.length > 10) {
-        embed.addFields({
-          name: '📝 Note',
-          value: `Showing first 10 repositories. You have ${subscriptionSummary.subscriptionsByRepository.length - 10} more.`,
-          inline: false
+      // Add pagination info if needed
+      if (totalPages > 1) {
+        embed.setFooter({ 
+          text: `Page ${currentPage} of ${totalPages} • ${subscriptionSummary.subscriptionsByRepository.length} total repositories` 
         });
       }
 
-      // Add action buttons
+      // Create action buttons
+      const components: ActionRowBuilder<ButtonBuilder>[] = [];
+
+      // Pagination buttons (if needed)
+      if (totalPages > 1) {
+        const paginationButtons: ButtonBuilder[] = [];
+
+        if (currentPage > 1) {
+          paginationButtons.push(
+            new ButtonBuilder()
+              .setCustomId(`subscriptions_page_${currentPage - 1}`)
+              .setLabel('◀ Previous')
+              .setStyle(ButtonStyle.Secondary)
+          );
+        }
+
+        if (currentPage < totalPages) {
+          paginationButtons.push(
+            new ButtonBuilder()
+              .setCustomId(`subscriptions_page_${currentPage + 1}`)
+              .setLabel('Next ▶')
+              .setStyle(ButtonStyle.Secondary)
+          );
+        }
+
+        if (paginationButtons.length > 0) {
+          const paginationRow = new ActionRowBuilder<ButtonBuilder>()
+            .addComponents(paginationButtons);
+          components.push(paginationRow);
+        }
+      }
+
+      // Management buttons
       const detailsButton = new ButtonBuilder()
         .setCustomId('view_subscription_details')
         .setLabel('View Details')
-        .setStyle(ButtonStyle.Primary);
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji('📋');
 
       const manageButton = new ButtonBuilder()
         .setCustomId('manage_subscriptions')
-        .setLabel('Manage Subscriptions')
-        .setStyle(ButtonStyle.Secondary);
+        .setLabel('Manage')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('⚙️');
 
-      const actionRow = new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(detailsButton, manageButton);
+      const refreshButton = new ButtonBuilder()
+        .setCustomId('refresh_subscriptions')
+        .setLabel('Refresh')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('🔄');
+
+      const managementRow = new ActionRowBuilder<ButtonBuilder>()
+        .addComponents(detailsButton, manageButton, refreshButton);
+      
+      components.push(managementRow);
 
       await interaction.editReply({
         embeds: [embed],
-        components: [actionRow]
+        components: components
       });
 
     } catch (error) {
@@ -94,6 +159,14 @@ export const subscriptionsCommand: Command = {
         .setDescription('An error occurred while loading your subscriptions. Please try again later.')
         .setColor(0xFF0000)
         .setTimestamp();
+
+      if (error instanceof Error) {
+        errorEmbed.addFields({
+          name: 'Error Details',
+          value: error.message,
+          inline: false
+        });
+      }
 
       await interaction.editReply({
         embeds: [errorEmbed]

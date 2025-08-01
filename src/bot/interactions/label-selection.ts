@@ -2,6 +2,9 @@ import { ButtonInteraction, SelectMenuInteraction, ActionRowBuilder, ButtonBuild
 import { ButtonHandler, SelectMenuHandler } from '../discord-client';
 import { DatabaseManager } from '../../database/manager';
 import { SubscriptionManager } from '../../services/subscription-manager';
+import { UserRepository } from '../../models/user-repository';
+import { GitHubService } from '../../services/github-service';
+import { createLabelSelectionUI } from './ui-components';
 
 // Button handler for confirming label selection
 export const confirmLabelSelectionHandler: ButtonHandler = {
@@ -20,8 +23,8 @@ export const confirmLabelSelectionHandler: ButtonHandler = {
         return;
       }
 
-      // Parse repository from embed title or description
-      const repositoryMatch = originalEmbed.description?.match(/Repository: (.+)/);
+      // Parse repository from embed description
+      const repositoryMatch = originalEmbed.description?.match(/Repository: \*\*([^*]+)\*\*/);
       if (!repositoryMatch) {
         await interaction.editReply({
           content: '❌ Error: Could not determine the repository. Please try the /monitor command again.'
@@ -42,7 +45,7 @@ export const confirmLabelSelectionHandler: ButtonHandler = {
 
       const labels = labelsField.value
         .split('\n')
-        .map(line => line.replace('• ', '').trim())
+        .map(line => line.replace(/^• `?([^`]+)`?$/, '$1').trim())
         .filter(label => label.length > 0);
 
       if (labels.length === 0) {
@@ -70,7 +73,7 @@ export const confirmLabelSelectionHandler: ButtonHandler = {
         .setDescription(`You are now monitoring **${repositoryId}** for the following labels:`)
         .addFields({
           name: 'Monitored Labels',
-          value: labels.map(label => `• ${label}`).join('\n'),
+          value: labels.map(label => `• \`${label}\``).join('\n'),
           inline: false
         })
         .setColor(0x00FF00)
@@ -128,29 +131,52 @@ export const labelSelectMenuHandler: SelectMenuHandler = {
       });
       return;
     }
+
+    // Extract repository information from the original message
+    const originalEmbed = interaction.message.embeds[0];
+    if (!originalEmbed) {
+      await interaction.editReply({
+        content: '❌ Error: Could not find the original repository information. Please try the /monitor command again.'
+      });
+      return;
+    }
+
+    // Parse repository from embed description
+    const repositoryMatch = originalEmbed.description?.match(/Repository: \*\*([^*]+)\*\*/);
+    if (!repositoryMatch) {
+      await interaction.editReply({
+        content: '❌ Error: Could not determine the repository. Please try the /monitor command again.'
+      });
+      return;
+    }
+
+    const repositoryName = repositoryMatch[1];
     
     // Create confirmation embed
     const embed = new EmbedBuilder()
-      .setTitle('Confirm Label Selection')
-      .setDescription(`You have selected the following labels for monitoring:`)
+      .setTitle('✅ Confirm Label Selection')
+      .setDescription(`Repository: **${repositoryName}**\n\nYou have selected the following labels for monitoring:`)
       .addFields({
         name: 'Selected Labels',
-        value: selectedLabels.map(label => `• ${label}`).join('\n'),
+        value: selectedLabels.map(label => `• \`${label}\``).join('\n'),
         inline: false
       })
-      .setColor(0x0099FF)
-      .setFooter({ text: 'Click "Confirm" to create your subscription or "Cancel" to abort.' });
+      .setColor(0x00FF00)
+      .setFooter({ text: 'Click "Confirm" to create your subscription or "Cancel" to abort.' })
+      .setTimestamp();
     
     // Create confirmation buttons
     const confirmButton = new ButtonBuilder()
       .setCustomId('confirm_label_selection')
       .setLabel('Confirm')
-      .setStyle(ButtonStyle.Success);
+      .setStyle(ButtonStyle.Success)
+      .setEmoji('✅');
     
     const cancelButton = new ButtonBuilder()
       .setCustomId('cancel_label_selection')
       .setLabel('Cancel')
-      .setStyle(ButtonStyle.Secondary);
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('❌');
     
     const actionRow = new ActionRowBuilder<ButtonBuilder>()
       .addComponents(confirmButton, cancelButton);
@@ -167,11 +193,92 @@ export const refreshLabelsHandler: ButtonHandler = {
   customId: 'refresh_labels',
   
   async execute(interaction: ButtonInteraction): Promise<void> {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferUpdate();
     
-    // TODO: This will be implemented when GitHub service integration is added
-    await interaction.editReply({
-      content: '🔄 Refreshing repository labels...\n\n*Full implementation will be completed in upcoming tasks.*'
-    });
+    try {
+      // Extract repository information from the original message
+      const originalEmbed = interaction.message.embeds[0];
+      if (!originalEmbed) {
+        await interaction.followUp({
+          content: '❌ Error: Could not find the original repository information. Please try the /monitor command again.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      // Parse repository from embed description
+      const repositoryMatch = originalEmbed.description?.match(/Repository: \*\*([^*]+)\*\*/);
+      if (!repositoryMatch) {
+        await interaction.followUp({
+          content: '❌ Error: Could not determine the repository. Please try the /monitor command again.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      const repositoryName = repositoryMatch[1];
+      const [owner, repo] = repositoryName.split('/');
+
+      if (!owner || !repo) {
+        await interaction.followUp({
+          content: '❌ Error: Invalid repository format. Please try the /monitor command again.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      // Initialize services
+      const db = DatabaseManager.getInstance();
+      const userRepo = new UserRepository(db.getConnection());
+      const githubService = new GitHubService();
+
+      // Get user's GitHub token if available
+      const user = await userRepo.findById(interaction.user.id);
+      const userToken = user?.githubToken;
+
+      // Fetch updated repository labels
+      const labels = await githubService.getRepositoryLabels(owner, repo, userToken);
+
+      if (labels.length === 0) {
+        await interaction.followUp({
+          content: '❌ No labels found in this repository.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      // Create updated label selection UI
+      const repositoryInfo = {
+        owner,
+        name: repo,
+        url: `https://github.com/${owner}/${repo}`
+      };
+
+      const labelOptions = labels.map(label => ({
+        name: label.name,
+        color: label.color,
+        description: label.description
+      }));
+
+      const { embed, components } = createLabelSelectionUI(repositoryInfo, labelOptions);
+
+      await interaction.editReply({
+        embeds: [embed],
+        components: components
+      });
+
+      await interaction.followUp({
+        content: '✅ Repository labels refreshed successfully!',
+        ephemeral: true
+      });
+
+    } catch (error: any) {
+      console.error('Error refreshing labels:', error);
+      
+      await interaction.followUp({
+        content: `❌ Failed to refresh labels: ${error.message}`,
+        ephemeral: true
+      });
+    }
   }
 };

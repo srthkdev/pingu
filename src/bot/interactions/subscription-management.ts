@@ -1,4 +1,4 @@
-import { ButtonInteraction, SelectMenuInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } from 'discord.js';
+import { ButtonInteraction, StringSelectMenuInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } from 'discord.js';
 import { ButtonHandler, SelectMenuHandler } from '../discord-client';
 import { DatabaseManager } from '../../database/manager';
 import { SubscriptionManager } from '../../services/subscription-manager';
@@ -71,7 +71,7 @@ export const viewSubscriptionDetailsHandler: ButtonHandler = {
 export const removeSubscriptionSelectHandler: SelectMenuHandler = {
   customId: 'remove_subscriptions',
   
-  async execute(interaction: SelectMenuInteraction): Promise<void> {
+  async execute(interaction: StringSelectMenuInteraction): Promise<void> {
     await interaction.deferReply({ ephemeral: true });
     
     const selectedSubscriptionIds = interaction.values;
@@ -325,5 +325,163 @@ export const addMoreLabelsHandler: ButtonHandler = {
     await interaction.editReply({
       content: '➕ Adding more labels to existing subscriptions...\n\n*This feature will be implemented when GitHub service integration is completed.*'
     });
+  }
+};
+
+// Button handler for subscription pagination
+export const subscriptionsPaginationHandler: ButtonHandler = {
+  customId: 'subscriptions_page',
+  
+  async execute(interaction: ButtonInteraction): Promise<void> {
+    await interaction.deferUpdate();
+    
+    try {
+      // Extract page number from custom ID
+      const pageMatch = interaction.customId.match(/subscriptions_page_(\d+)/);
+      if (!pageMatch) {
+        await interaction.followUp({
+          content: '❌ Error: Invalid pagination request.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      const page = parseInt(pageMatch[1], 10);
+      
+      const db = DatabaseManager.getInstance();
+      const subscriptionManager = new SubscriptionManager(db.getConnection());
+      
+      const subscriptionSummary = await subscriptionManager.getUserSubscriptions(interaction.user.id);
+      
+      if (subscriptionSummary.totalSubscriptions === 0) {
+        await interaction.editReply({
+          content: '📋 You have no active subscriptions.',
+          embeds: [],
+          components: []
+        });
+        return;
+      }
+
+      // Pagination settings
+      const itemsPerPage = 8;
+      const totalPages = Math.ceil(subscriptionSummary.subscriptionsByRepository.length / itemsPerPage);
+      const currentPage = Math.min(Math.max(1, page), totalPages);
+      
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      const endIndex = startIndex + itemsPerPage;
+      const repositoriesToShow = subscriptionSummary.subscriptionsByRepository.slice(startIndex, endIndex);
+
+      // Create summary embed
+      const embed = new EmbedBuilder()
+        .setTitle('📋 Your Subscriptions')
+        .setDescription(`You are monitoring **${subscriptionSummary.repositoryCount}** repositories with **${subscriptionSummary.totalSubscriptions}** subscriptions covering **${subscriptionSummary.labelCount}** labels.`)
+        .setColor(0x0099FF)
+        .setTimestamp();
+
+      // Add repository information
+      for (const { repository, subscription } of repositoriesToShow) {
+        const labelText = subscription.labels.length > 5 
+          ? `${subscription.labels.slice(0, 5).map(label => `\`${label}\``).join(', ')} and ${subscription.labels.length - 5} more`
+          : subscription.labels.map(label => `\`${label}\``).join(', ');
+          
+        const createdAt = Math.floor(subscription.createdAt.getTime() / 1000);
+        
+        embed.addFields({
+          name: `🔗 ${repository.owner}/${repository.name}`,
+          value: `**Labels:** ${labelText}\n**Created:** <t:${createdAt}:R>`,
+          inline: false
+        });
+      }
+
+      // Add pagination info if needed
+      if (totalPages > 1) {
+        embed.setFooter({ 
+          text: `Page ${currentPage} of ${totalPages} • ${subscriptionSummary.subscriptionsByRepository.length} total repositories` 
+        });
+      }
+
+      // Create action buttons
+      const components: ActionRowBuilder<ButtonBuilder>[] = [];
+
+      // Pagination buttons (if needed)
+      if (totalPages > 1) {
+        const paginationButtons: ButtonBuilder[] = [];
+
+        if (currentPage > 1) {
+          paginationButtons.push(
+            new ButtonBuilder()
+              .setCustomId(`subscriptions_page_${currentPage - 1}`)
+              .setLabel('◀ Previous')
+              .setStyle(ButtonStyle.Secondary)
+          );
+        }
+
+        if (currentPage < totalPages) {
+          paginationButtons.push(
+            new ButtonBuilder()
+              .setCustomId(`subscriptions_page_${currentPage + 1}`)
+              .setLabel('Next ▶')
+              .setStyle(ButtonStyle.Secondary)
+          );
+        }
+
+        if (paginationButtons.length > 0) {
+          const paginationRow = new ActionRowBuilder<ButtonBuilder>()
+            .addComponents(paginationButtons);
+          components.push(paginationRow);
+        }
+      }
+
+      // Management buttons
+      const detailsButton = new ButtonBuilder()
+        .setCustomId('view_subscription_details')
+        .setLabel('View Details')
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji('📋');
+
+      const manageButton = new ButtonBuilder()
+        .setCustomId('manage_subscriptions')
+        .setLabel('Manage')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('⚙️');
+
+      const refreshButton = new ButtonBuilder()
+        .setCustomId('refresh_subscriptions')
+        .setLabel('Refresh')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('🔄');
+
+      const managementRow = new ActionRowBuilder<ButtonBuilder>()
+        .addComponents(detailsButton, manageButton, refreshButton);
+      
+      components.push(managementRow);
+
+      await interaction.editReply({
+        embeds: [embed],
+        components: components
+      });
+
+    } catch (error) {
+      console.error('Error handling subscription pagination:', error);
+      await interaction.followUp({
+        content: '❌ An error occurred while loading the page. Please try again.',
+        ephemeral: true
+      });
+    }
+  }
+};
+
+// Button handler for refreshing subscriptions list
+export const refreshSubscriptionsHandler: ButtonHandler = {
+  customId: 'refresh_subscriptions',
+  
+  async execute(interaction: ButtonInteraction): Promise<void> {
+    // Reuse the pagination handler with page 1
+    const modifiedInteraction = {
+      ...interaction,
+      customId: 'subscriptions_page_1'
+    };
+    
+    await subscriptionsPaginationHandler.execute(modifiedInteraction as ButtonInteraction);
   }
 };

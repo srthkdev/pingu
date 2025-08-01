@@ -10,7 +10,7 @@ import {
 export interface LabelOption {
   name: string;
   color: string;
-  description?: string;
+  description?: string | undefined;
 }
 
 export interface RepositoryInfo {

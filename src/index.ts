@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { DiscordClient } from './bot/discord-client';
 import { commands } from './bot/commands';
 import { buttonHandlers, selectMenuHandlers } from './bot/interactions';
+import { DatabaseManager, createDatabaseConfig } from './database/manager';
 
 // Load environment variables
 dotenv.config();
@@ -44,6 +45,14 @@ async function main() {
     console.log(`Registered select menu handler: ${handler.customId}`);
   });
   
+  // Initialize database
+  console.log('Initializing database...');
+  const environment = process.env.NODE_ENV || 'development';
+  const dbConfig = createDatabaseConfig(environment);
+  const dbManager = DatabaseManager.getInstance(dbConfig);
+  await dbManager.initialize();
+  console.log('Database initialized successfully');
+  
   // Register commands with Discord API
   await discordClient.registerCommands();
   
@@ -51,7 +60,6 @@ async function main() {
   console.log('Connecting to Discord...');
   await discordClient.login();
   
-  // TODO: Initialize database connection
   // TODO: Start webhook server
   
   console.log('Bot setup complete - Discord bot is now online!');
@@ -60,6 +68,7 @@ async function main() {
   const shutdown = async () => {
     console.log('Shutting down bot...');
     await discordClient.destroy();
+    await dbManager.close();
     process.exit(0);
   };
   

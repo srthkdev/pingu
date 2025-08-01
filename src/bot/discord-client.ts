@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, Collection, REST, Routes, SlashCommandBuilder, SlashCommandSubcommandsOnlyBuilder, SlashCommandOptionsOnlyBuilder } from 'discord.js';
-import { ButtonInteraction, SelectMenuInteraction, ChatInputCommandInteraction } from 'discord.js';
+import { ButtonInteraction, StringSelectMenuInteraction, ChatInputCommandInteraction } from 'discord.js';
 
 export interface Command {
   data: SlashCommandBuilder | SlashCommandSubcommandsOnlyBuilder | SlashCommandOptionsOnlyBuilder;
@@ -13,7 +13,7 @@ export interface ButtonHandler {
 
 export interface SelectMenuHandler {
   customId: string;
-  execute: (interaction: SelectMenuInteraction) => Promise<void>;
+  execute: (interaction: StringSelectMenuInteraction) => Promise<void>;
 }
 
 export class DiscordClient {
@@ -103,7 +103,19 @@ export class DiscordClient {
   }
 
   private async handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
-    const handler = this.buttonHandlers.get(interaction.customId);
+    let handler = this.buttonHandlers.get(interaction.customId);
+    
+    // If no exact match, try pattern matching for dynamic custom IDs
+    if (!handler) {
+      // Check for pagination pattern
+      if (interaction.customId.startsWith('subscriptions_page_')) {
+        handler = this.buttonHandlers.get('subscriptions_page');
+      }
+      // Check for confirmation pattern with data
+      else if (interaction.customId.startsWith('confirm_subscription_removal:')) {
+        handler = this.buttonHandlers.get('confirm_subscription_removal');
+      }
+    }
     
     if (!handler) {
       console.error(`No button handler matching ${interaction.customId} was found.`);
@@ -117,7 +129,7 @@ export class DiscordClient {
     await handler.execute(interaction);
   }
 
-  private async handleSelectMenuInteraction(interaction: SelectMenuInteraction): Promise<void> {
+  private async handleSelectMenuInteraction(interaction: StringSelectMenuInteraction): Promise<void> {
     const handler = this.selectMenuHandlers.get(interaction.customId);
     
     if (!handler) {
