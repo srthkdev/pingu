@@ -20,12 +20,18 @@ export interface ProcessedWebhookEvent {
   repositoryId: string;
   affectedUsers: string[];
   issueInfo?: IssueInfo;
+  eventId?: string;
+  processedAt: Date;
+  filtered?: boolean;
+  filterReason?: string;
 }
 
 export class WebhookHandler {
   private subscriptionManager: SubscriptionManager;
   private notificationService: NotificationService;
   private config: WebhookHandlerConfig;
+  private processedEvents: Map<string, Date> = new Map(); // For deduplication
+  private readonly eventTTL = 5 * 60 * 1000; // 5 minutes TTL for processed events
 
   constructor(
     subscriptionManager: SubscriptionManager,
@@ -44,6 +50,9 @@ export class WebhookHandler {
     if (!this.config.webhookSecret) {
       console.warn('GitHub webhook secret not configured - webhook signature validation will be skipped');
     }
+
+    // Start cleanup interval for processed events
+    this.startEventCleanup();
   }
 
   /**
@@ -128,26 +137,57 @@ export class WebhookHandler {
       return {
         type: 'unknown',
         repositoryId: '',
-        affectedUsers: []
+        affectedUsers: [],
+        processedAt: new Date()
       };
     }
 
+    // Generate event ID for deduplication
+    const eventId = this.generateEventId(webhookPayload, eventType);
+    
+    // Check for duplicate events
+    if (this.isDuplicateEvent(eventId)) {
+      console.log(`Duplicate event detected: ${eventId}`);
+      return {
+        type: 'unknown',
+        repositoryId: webhookPayload.repository?.full_name || '',
+        affectedUsers: [],
+        eventId,
+        processedAt: new Date(),
+        filtered: true,
+        filterReason: 'Duplicate event'
+      };
+    }
+
+    // Mark event as processed
+    this.markEventProcessed(eventId);
+
     // Process based on event type
+    let result: ProcessedWebhookEvent;
     switch (eventType) {
       case 'ping':
-        return this.processPingEvent(webhookPayload);
+        result = this.processPingEvent(webhookPayload);
+        break;
       
       case 'issues':
-        return await this.processIssueEvent(webhookPayload);
+        result = await this.processIssueEvent(webhookPayload);
+        break;
       
       default:
         console.log(`Unhandled event type: ${eventType}`);
-        return {
+        result = {
           type: 'unknown',
           repositoryId: '',
-          affectedUsers: []
+          affectedUsers: [],
+          processedAt: new Date()
         };
     }
+
+    // Add event metadata
+    result.eventId = eventId;
+    result.processedAt = new Date();
+
+    return result;
   }
 
   /**
@@ -162,13 +202,14 @@ export class WebhookHandler {
 
     return {
       type: 'ping',
-      repositoryId: '',
-      affectedUsers: []
+      repositoryId: payload.repository?.full_name || '',
+      affectedUsers: [],
+      processedAt: new Date()
     };
   }
 
   /**
-   * Process issue event
+   * Process issue event with enhanced filtering
    */
   private async processIssueEvent(payload: GitHubWebhookPayload): Promise<ProcessedWebhookEvent> {
     if (!payload.action || !payload.issue || !payload.repository) {
@@ -180,13 +221,17 @@ export class WebhookHandler {
 
     console.log(`Processing issue event: ${action} for ${repositoryId}#${issue.number}`);
 
-    // Only process 'opened' and 'labeled' actions
-    if (action !== 'opened' && action !== 'labeled') {
-      console.log(`Ignoring issue action: ${action}`);
+    // Apply event filtering
+    const filterResult = this.filterIssueEvent(payload);
+    if (filterResult.filtered) {
+      console.log(`Filtered issue event: ${filterResult.reason}`);
       return {
         type: 'issue',
         repositoryId,
-        affectedUsers: []
+        affectedUsers: [],
+        processedAt: new Date(),
+        filtered: true,
+        filterReason: filterResult.reason || 'Unknown filter reason'
       };
     }
 
@@ -223,34 +268,145 @@ export class WebhookHandler {
       console.log(`Found ${affectedUsers.size} total subscribers for issue labels in ${repositoryId}`);
     }
 
-    // Send notifications to affected users
+    // Send notifications to affected users using the notification pipeline
     const affectedUsersList = Array.from(affectedUsers);
-    
-    for (const userId of affectedUsersList) {
-      try {
-        // Determine which label triggered the notification
-        let triggeredLabel = '';
-        if (action === 'labeled' && payload.label) {
-          triggeredLabel = payload.label.name;
-        } else if (action === 'opened' && issue.labels.length > 0) {
-          // For opened issues, we'll use the first label as the triggered label
-          // In practice, we might want to send separate notifications for each subscribed label
-          triggeredLabel = issue.labels[0].name;
-        }
-
-        await this.notificationService.sendIssueNotification(userId, issueInfo, triggeredLabel);
-      } catch (error) {
-        console.error(`Failed to send notification to user ${userId}:`, error);
-        // Continue processing other users even if one fails
-      }
-    }
+    await this.processNotificationPipeline(affectedUsersList, issueInfo, action, payload.label);
 
     return {
       type: 'issue',
       repositoryId,
       affectedUsers: affectedUsersList,
-      issueInfo
+      issueInfo,
+      processedAt: new Date()
     };
+  }
+
+  /**
+   * Filter issue events to determine if they should be processed
+   */
+  private filterIssueEvent(payload: GitHubWebhookPayload): { filtered: boolean; reason?: string } {
+    const { action, issue } = payload;
+
+    if (!issue) {
+      return { filtered: true, reason: 'Missing issue data' };
+    }
+
+    // Only process 'opened' and 'labeled' actions
+    if (action !== 'opened' && action !== 'labeled') {
+      return { filtered: true, reason: `Unsupported action: ${action}` };
+    }
+
+    // Skip draft issues (if the property exists)
+    if ('draft' in issue && issue.draft) {
+      return { filtered: true, reason: 'Issue is a draft' };
+    }
+
+    // Skip issues from bots (optional filtering)
+    if ('type' in issue.user && issue.user.type === 'Bot' && process.env.FILTER_BOT_ISSUES === 'true') {
+      return { filtered: true, reason: 'Issue created by bot' };
+    }
+
+    // For labeled events, ensure a label was actually added
+    if (action === 'labeled' && !payload.label) {
+      return { filtered: true, reason: 'Labeled event without label information' };
+    }
+
+    // Skip if issue has no labels (for opened events)
+    if (action === 'opened' && (!issue.labels || issue.labels.length === 0)) {
+      return { filtered: true, reason: 'Opened issue has no labels' };
+    }
+
+    return { filtered: false };
+  }
+
+  /**
+   * Process notification pipeline with enhanced error handling
+   */
+  private async processNotificationPipeline(
+    userIds: string[],
+    issueInfo: IssueInfo,
+    action: string,
+    triggeredLabel?: any
+  ): Promise<void> {
+    const notificationPromises = userIds.map(async (userId) => {
+      try {
+        // Determine which label triggered the notification
+        let labelName = '';
+        if (action === 'labeled' && triggeredLabel) {
+          labelName = triggeredLabel.name;
+        } else if (action === 'opened' && issueInfo.labels.length > 0) {
+          // For opened issues, send notifications for each subscribed label
+          const userSubscriptions = await this.subscriptionManager.getUserSubscriptions(userId);
+          const subscribedLabels = userSubscriptions.subscriptionsByRepository
+            .find(sub => sub.repository.id === `${issueInfo.repositoryOwner}/${issueInfo.repositoryName}`)
+            ?.subscription.labels || [];
+
+          // Find the first matching label
+          labelName = issueInfo.labels.find(label => subscribedLabels.includes(label)) || issueInfo.labels[0];
+        }
+
+        await this.notificationService.sendIssueNotification(userId, issueInfo, labelName);
+        console.log(`Notification sent to user ${userId} for label "${labelName}"`);
+      } catch (error) {
+        console.error(`Failed to send notification to user ${userId}:`, error);
+        // Continue processing other users even if one fails
+      }
+    });
+
+    // Wait for all notifications to complete
+    await Promise.allSettled(notificationPromises);
+  }
+
+  /**
+   * Generate unique event ID for deduplication
+   */
+  private generateEventId(payload: GitHubWebhookPayload, eventType: string): string {
+    const repository = payload.repository?.full_name || 'unknown';
+    const timestamp = new Date().toISOString();
+    
+    if (eventType === 'issues' && payload.issue) {
+      return `${eventType}-${repository}-${payload.issue.number}-${payload.action}-${timestamp}`;
+    }
+    
+    return `${eventType}-${repository}-${timestamp}`;
+  }
+
+  /**
+   * Check if event has already been processed
+   */
+  private isDuplicateEvent(eventId: string): boolean {
+    return this.processedEvents.has(eventId);
+  }
+
+  /**
+   * Mark event as processed
+   */
+  private markEventProcessed(eventId: string): void {
+    this.processedEvents.set(eventId, new Date());
+  }
+
+  /**
+   * Start cleanup interval for processed events
+   */
+  private startEventCleanup(): void {
+    setInterval(() => {
+      const now = new Date();
+      const expiredEvents: string[] = [];
+
+      for (const [eventId, processedAt] of this.processedEvents.entries()) {
+        if (now.getTime() - processedAt.getTime() > this.eventTTL) {
+          expiredEvents.push(eventId);
+        }
+      }
+
+      expiredEvents.forEach(eventId => {
+        this.processedEvents.delete(eventId);
+      });
+
+      if (expiredEvents.length > 0) {
+        console.log(`Cleaned up ${expiredEvents.length} expired event records`);
+      }
+    }, 60000); // Run cleanup every minute
   }
 
 
@@ -262,11 +418,15 @@ export class WebhookHandler {
     allowedEvents: string[];
     hasWebhookSecret: boolean;
     maxPayloadSize: number;
+    processedEventsCount: number;
+    eventTTL: number;
   } {
     return {
       allowedEvents: [...this.config.allowedEvents],
       hasWebhookSecret: !!this.config.webhookSecret,
-      maxPayloadSize: this.config.maxPayloadSize
+      maxPayloadSize: this.config.maxPayloadSize,
+      processedEventsCount: this.processedEvents.size,
+      eventTTL: this.eventTTL
     };
   }
 

@@ -37,11 +37,19 @@ export class SubscriptionManager {
   private subscriptionRepo: SubscriptionRepository;
   private userRepo: UserRepository;
   private repositoryRepo: RepositoryRepository;
+  private webhookManager?: any; // Will be set via setWebhookManager to avoid circular dependency
 
   constructor(db: DatabaseConnection) {
     this.subscriptionRepo = new SubscriptionRepository(db);
     this.userRepo = new UserRepository(db);
     this.repositoryRepo = new RepositoryRepository(db);
+  }
+
+  /**
+   * Sets the webhook manager (called after initialization to avoid circular dependency)
+   */
+  setWebhookManager(webhookManager: any): void {
+    this.webhookManager = webhookManager;
   }
 
   /**
@@ -85,10 +93,22 @@ export class SubscriptionManager {
       throw new ValidationError('No new labels to subscribe to', 'labels');
     }
 
-    return await this.subscriptionRepo.create({
+    const subscription = await this.subscriptionRepo.create({
       ...input,
       labels: labelsToCreate
     });
+
+    // Ensure webhook is registered for this repository
+    if (this.webhookManager) {
+      try {
+        await this.webhookManager.ensureRepositoryWebhook(input.repositoryId, input.userId);
+      } catch (error) {
+        console.warn(`Failed to ensure webhook for repository ${input.repositoryId}:`, error);
+        // Don't fail subscription creation if webhook setup fails
+      }
+    }
+
+    return subscription;
   }
 
   /**
@@ -136,14 +156,41 @@ export class SubscriptionManager {
    * Remove a subscription
    */
   async removeSubscription(subscriptionId: string): Promise<boolean> {
-    return await this.subscriptionRepo.delete(subscriptionId);
+    // Get subscription info before deletion for webhook cleanup
+    const subscription = await this.subscriptionRepo.findById(subscriptionId);
+    
+    const result = await this.subscriptionRepo.delete(subscriptionId);
+    
+    // Clean up webhook if this was the last subscription for the repository
+    if (result && subscription && this.webhookManager) {
+      try {
+        await this.webhookManager.cleanupRepositoryWebhook(subscription.repositoryId, subscription.userId);
+      } catch (error) {
+        console.warn(`Failed to cleanup webhook for repository ${subscription.repositoryId}:`, error);
+        // Don't fail subscription removal if webhook cleanup fails
+      }
+    }
+    
+    return result;
   }
 
   /**
    * Remove all subscriptions for a user and repository
    */
   async removeUserRepositorySubscriptions(userId: string, repositoryId: string): Promise<number> {
-    return await this.subscriptionRepo.deleteByUserAndRepository(userId, repositoryId);
+    const result = await this.subscriptionRepo.deleteByUserAndRepository(userId, repositoryId);
+    
+    // Clean up webhook if no more subscriptions exist for the repository
+    if (result > 0 && this.webhookManager) {
+      try {
+        await this.webhookManager.cleanupRepositoryWebhook(repositoryId, userId);
+      } catch (error) {
+        console.warn(`Failed to cleanup webhook for repository ${repositoryId}:`, error);
+        // Don't fail subscription removal if webhook cleanup fails
+      }
+    }
+    
+    return result;
   }
 
   /**

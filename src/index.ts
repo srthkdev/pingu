@@ -7,6 +7,8 @@ import { NotificationService } from './services/notification-service';
 import { SubscriptionManager } from './services/subscription-manager';
 import { WebhookHandler } from './handlers/webhook-handler';
 import { WebhookServer } from './services/webhook-server';
+import { WebhookManager } from './services/webhook-manager';
+import { GitHubService } from './services/github-service';
 
 // Load environment variables
 dotenv.config();
@@ -59,8 +61,19 @@ async function main() {
 
   // Initialize services
   console.log('Initializing services...');
+  const githubService = new GitHubService(process.env.GITHUB_TOKEN);
   const subscriptionManager = new SubscriptionManager(dbManager.getConnection());
   const notificationService = new NotificationService(discordClient.getClient());
+  
+  // Initialize webhook manager
+  const webhookManager = new WebhookManager(
+    dbManager.getConnection(),
+    githubService,
+    process.env.WEBHOOK_BASE_URL
+  );
+  
+  // Connect webhook manager to subscription manager (avoid circular dependency)
+  subscriptionManager.setWebhookManager(webhookManager);
   
   // Initialize webhook handler and server
   const webhookHandler = new WebhookHandler(subscriptionManager, notificationService);

@@ -408,6 +408,211 @@ export class GitHubService {
   }
 
   /**
+   * Manages webhook registration for a repository
+   * Creates webhook if it doesn't exist, returns existing webhook info if it does
+   */
+  async manageRepositoryWebhook(owner: string, repo: string, webhookUrl: string, userToken?: string): Promise<WebhookInfo> {
+    const client = userToken ? new Octokit({ auth: userToken }) : this.octokit;
+    
+    return this.executeWithRateLimit(async () => {
+      try {
+        // First, check if webhook already exists
+        const existingWebhook = await this.findExistingWebhook(owner, repo, webhookUrl, client);
+        if (existingWebhook) {
+          return existingWebhook;
+        }
+
+        // Create new webhook if none exists
+        return await this.createRepositoryWebhook(owner, repo, webhookUrl, client);
+      } catch (error: any) {
+        throw new Error(`Failed to manage repository webhook: ${error.message}`);
+      }
+    });
+  }
+
+  /**
+   * Creates a new webhook for a repository
+   */
+  private async createRepositoryWebhook(owner: string, repo: string, webhookUrl: string, client: Octokit): Promise<WebhookInfo> {
+    const secret = this.generateWebhookSecret();
+    
+    const response = await client.rest.repos.createWebhook({
+      owner,
+      repo,
+      config: {
+        url: webhookUrl,
+        content_type: 'json',
+        secret,
+        insecure_ssl: '0' // Always require SSL
+      },
+      events: ['issues'], // Only listen to issue events
+      active: true,
+    });
+
+    // Update rate limit info from response headers
+    if (response.headers) {
+      this.updateRateLimitInfo(response.headers);
+    }
+
+    return {
+      id: response.data.id,
+      url: response.data.config.url || webhookUrl,
+      secret,
+    };
+  }
+
+  /**
+   * Finds existing webhook for the repository with matching URL
+   */
+  private async findExistingWebhook(owner: string, repo: string, webhookUrl: string, client: Octokit): Promise<WebhookInfo | null> {
+    try {
+      const response = await client.rest.repos.listWebhooks({
+        owner,
+        repo,
+        per_page: 100
+      });
+
+      // Update rate limit info from response headers
+      if (response.headers) {
+        this.updateRateLimitInfo(response.headers);
+      }
+
+      // Find webhook with matching URL
+      const existingWebhook = response.data.find(webhook => 
+        webhook.config.url === webhookUrl && 
+        webhook.events.includes('issues') &&
+        webhook.active
+      );
+
+      if (existingWebhook) {
+        return {
+          id: existingWebhook.id,
+          url: existingWebhook.config.url || webhookUrl,
+          secret: existingWebhook.config.secret || '' // We can't retrieve the actual secret
+        };
+      }
+
+      return null;
+    } catch (error: any) {
+      // If we can't list webhooks, we'll try to create a new one
+      if (error.status === 403 || error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Removes a webhook from a repository with error handling
+   */
+  async removeRepositoryWebhook(owner: string, repo: string, webhookId: number, userToken?: string): Promise<boolean> {
+    const client = userToken ? new Octokit({ auth: userToken }) : this.octokit;
+    
+    return this.executeWithRateLimit(async () => {
+      try {
+        await client.rest.repos.deleteWebhook({
+          owner,
+          repo,
+          hook_id: webhookId,
+        });
+
+        return true;
+      } catch (error: any) {
+        // If webhook doesn't exist, consider it successfully removed
+        if (error.status === 404) {
+          return true;
+        }
+        
+        // Log other errors but don't throw - webhook cleanup is best effort
+        console.warn(`Failed to remove webhook ${webhookId} from ${owner}/${repo}:`, error.message);
+        return false;
+      }
+    });
+  }
+
+  /**
+   * Validates webhook permissions for a repository
+   */
+  async validateWebhookPermissions(owner: string, repo: string, userToken?: string): Promise<{ canManageWebhooks: boolean; reason?: string }> {
+    const client = userToken ? new Octokit({ auth: userToken }) : this.octokit;
+    
+    return this.executeWithRateLimit(async () => {
+      try {
+        // Try to list webhooks to check permissions
+        await client.rest.repos.listWebhooks({
+          owner,
+          repo,
+          per_page: 1
+        });
+
+        return { canManageWebhooks: true };
+      } catch (error: any) {
+        if (error.status === 403) {
+          return { 
+            canManageWebhooks: false, 
+            reason: 'Insufficient permissions to manage webhooks. Admin access to the repository is required.' 
+          };
+        }
+        
+        if (error.status === 404) {
+          return { 
+            canManageWebhooks: false, 
+            reason: 'Repository not found or no access to repository.' 
+          };
+        }
+
+        return { 
+          canManageWebhooks: false, 
+          reason: `Unable to validate webhook permissions: ${error.message}` 
+        };
+      }
+    });
+  }
+
+  /**
+   * Gets webhook information for a repository
+   */
+  async getRepositoryWebhookInfo(owner: string, repo: string, webhookUrl: string, userToken?: string): Promise<WebhookInfo | null> {
+    const client = userToken ? new Octokit({ auth: userToken }) : this.octokit;
+    
+    return this.executeWithRateLimit(async () => {
+      try {
+        return await this.findExistingWebhook(owner, repo, webhookUrl, client);
+      } catch (error: any) {
+        console.warn(`Failed to get webhook info for ${owner}/${repo}:`, error.message);
+        return null;
+      }
+    });
+  }
+
+  /**
+   * Checks if a repository has any active webhooks
+   */
+  async hasActiveWebhooks(owner: string, repo: string, userToken?: string): Promise<boolean> {
+    const client = userToken ? new Octokit({ auth: userToken }) : this.octokit;
+    
+    return this.executeWithRateLimit(async () => {
+      try {
+        const response = await client.rest.repos.listWebhooks({
+          owner,
+          repo,
+          per_page: 100
+        });
+
+        // Update rate limit info from response headers
+        if (response.headers) {
+          this.updateRateLimitInfo(response.headers);
+        }
+
+        return response.data.some(webhook => webhook.active);
+      } catch (error: any) {
+        // If we can't check, assume no webhooks
+        return false;
+      }
+    });
+  }
+
+  /**
    * Generates a random secret for webhook validation
    */
   private generateWebhookSecret(): string {
