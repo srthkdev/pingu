@@ -1,5 +1,7 @@
 import { ButtonInteraction, SelectMenuInteraction, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import { ButtonHandler, SelectMenuHandler } from '../discord-client';
+import { DatabaseManager } from '../../database/manager';
+import { SubscriptionManager } from '../../services/subscription-manager';
 
 // Button handler for confirming label selection
 export const confirmLabelSelectionHandler: ButtonHandler = {
@@ -8,11 +10,94 @@ export const confirmLabelSelectionHandler: ButtonHandler = {
   async execute(interaction: ButtonInteraction): Promise<void> {
     await interaction.deferReply({ ephemeral: true });
     
-    // TODO: This will be implemented when subscription management is added
-    // For now, provide feedback that the selection was received
-    await interaction.editReply({
-      content: '✅ Label selection confirmed! Your subscription preferences have been saved.\n\n*Full implementation will be completed in upcoming tasks.*'
-    });
+    try {
+      // Extract repository and labels from the original message
+      const originalEmbed = interaction.message.embeds[0];
+      if (!originalEmbed) {
+        await interaction.editReply({
+          content: '❌ Error: Could not find the original label selection. Please try the /monitor command again.'
+        });
+        return;
+      }
+
+      // Parse repository from embed title or description
+      const repositoryMatch = originalEmbed.description?.match(/Repository: (.+)/);
+      if (!repositoryMatch) {
+        await interaction.editReply({
+          content: '❌ Error: Could not determine the repository. Please try the /monitor command again.'
+        });
+        return;
+      }
+
+      const repositoryId = repositoryMatch[1];
+      
+      // Parse selected labels from embed fields
+      const labelsField = originalEmbed.fields?.find(field => field.name === 'Selected Labels');
+      if (!labelsField) {
+        await interaction.editReply({
+          content: '❌ Error: Could not find selected labels. Please try the /monitor command again.'
+        });
+        return;
+      }
+
+      const labels = labelsField.value
+        .split('\n')
+        .map(line => line.replace('• ', '').trim())
+        .filter(label => label.length > 0);
+
+      if (labels.length === 0) {
+        await interaction.editReply({
+          content: '❌ Error: No labels were selected. Please try the /monitor command again.'
+        });
+        return;
+      }
+
+      // Create subscription using SubscriptionManager
+      const db = DatabaseManager.getInstance();
+      const subscriptionManager = new SubscriptionManager(db.getConnection());
+
+      await subscriptionManager.createSubscription({
+        userId: interaction.user.id,
+        repositoryId: repositoryId,
+        labels: labels
+      }, {
+        mergeWithExisting: true // Allow merging with existing subscriptions
+      });
+
+      // Create success embed
+      const successEmbed = new EmbedBuilder()
+        .setTitle('✅ Subscription Created Successfully!')
+        .setDescription(`You are now monitoring **${repositoryId}** for the following labels:`)
+        .addFields({
+          name: 'Monitored Labels',
+          value: labels.map(label => `• ${label}`).join('\n'),
+          inline: false
+        })
+        .setColor(0x00FF00)
+        .setFooter({ text: 'You will receive notifications when issues are labeled with these tags.' })
+        .setTimestamp();
+
+      await interaction.editReply({
+        embeds: [successEmbed]
+      });
+
+    } catch (error) {
+      console.error('Error confirming label selection:', error);
+      
+      let errorMessage = '❌ An error occurred while creating your subscription.';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Subscription conflicts')) {
+          errorMessage = `❌ ${error.message}\n\nTip: Use the /subscriptions command to manage your existing subscriptions.`;
+        } else if (error.message.includes('not found')) {
+          errorMessage = '❌ Repository or user not found. Please ensure the repository exists and try again.';
+        }
+      }
+
+      await interaction.editReply({
+        content: errorMessage
+      });
+    }
   }
 };
 

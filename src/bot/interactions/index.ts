@@ -10,7 +10,9 @@ import {
   removeSubscriptionSelectHandler,
   confirmSubscriptionRemovalHandler,
   cancelSubscriptionRemovalHandler,
-  addMoreLabelsHandler
+  addMoreLabelsHandler,
+  manageSubscriptionsHandler,
+  refreshSubscriptionDetailsHandler
 } from './subscription-management';
 
 // Export all button handlers
@@ -21,7 +23,9 @@ export const buttonHandlers: ButtonHandler[] = [
   viewSubscriptionDetailsHandler,
   confirmSubscriptionRemovalHandler,
   cancelSubscriptionRemovalHandler,
-  addMoreLabelsHandler
+  addMoreLabelsHandler,
+  manageSubscriptionsHandler,
+  refreshSubscriptionDetailsHandler
 ];
 
 // Export all select menu handlers
@@ -40,5 +44,7 @@ export {
   removeSubscriptionSelectHandler,
   confirmSubscriptionRemovalHandler,
   cancelSubscriptionRemovalHandler,
-  addMoreLabelsHandler
+  addMoreLabelsHandler,
+  manageSubscriptionsHandler,
+  refreshSubscriptionDetailsHandler
 };
