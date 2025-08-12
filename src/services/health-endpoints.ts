@@ -199,8 +199,8 @@ export class HealthEndpoints {
       });
     });
 
-    // 404 handler
-    this.app.use('*', (req: Request, res: Response) => {
+    // 404 handler - use a function instead of '*' pattern
+    this.app.use((req: Request, res: Response) => {
       res.status(404).json({
         error: 'Endpoint not found',
         path: req.originalUrl,

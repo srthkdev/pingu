@@ -442,25 +442,41 @@ export class WebhookHandler {
    * Create Express router for webhook endpoints
    */
   public createRouter(): Router {
+    console.log('Creating webhook router...');
     const router = Router();
 
-    // Middleware to capture raw body for signature validation
-    router.use('/webhook', (req: Request, _res: Response, next) => {
-      let data = '';
-      req.setEncoding('utf8');
-      
-      req.on('data', (chunk) => {
-        data += chunk;
-      });
-      
-      req.on('end', () => {
-        (req as any).rawBody = data;
-        next();
-      });
+    // Test with a simple route first
+    console.log('Setting up simple test route...');
+    router.get('/test', (_req: Request, res: Response) => {
+      res.json({ message: 'Router working' });
     });
 
+    // Middleware to capture raw body for signature validation
+    console.log('Setting up webhook middleware...');
+    try {
+      router.use('/webhook', (req: Request, _res: Response, next) => {
+        let data = '';
+        req.setEncoding('utf8');
+        
+        req.on('data', (chunk) => {
+          data += chunk;
+        });
+        
+        req.on('end', () => {
+          (req as any).rawBody = data;
+          next();
+        });
+      });
+      console.log('Webhook middleware setup complete');
+    } catch (error) {
+      console.error('Error setting up webhook middleware:', error);
+      throw error;
+    }
+
     // GitHub webhook endpoint
-    router.post('/webhook', async (req: Request, res: Response) => {
+    console.log('Setting up webhook POST route...');
+    try {
+      router.post('/webhook', async (req: Request, res: Response) => {
       try {
         const rawBody = (req as any).rawBody;
         
@@ -493,9 +509,16 @@ export class WebhookHandler {
         });
       }
     });
+    console.log('Webhook POST route setup complete');
+    } catch (error) {
+      console.error('Error setting up webhook POST route:', error);
+      throw error;
+    }
 
     // Health check endpoint
-    router.get('/webhook/health', (_req: Request, res: Response) => {
+    console.log('Setting up health check route...');
+    try {
+      router.get('/webhook/health', (_req: Request, res: Response) => {
       const stats = this.getStats();
       res.status(200).json({
         status: 'healthy',
@@ -503,7 +526,13 @@ export class WebhookHandler {
         config: stats
       });
     });
+    console.log('Health check route setup complete');
+    } catch (error) {
+      console.error('Error setting up health check route:', error);
+      throw error;
+    }
 
+    console.log('Router creation complete');
     return router;
   }
 }

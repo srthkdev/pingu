@@ -1,4 +1,4 @@
--- GitHub Label Notifier Database Schema
+-- Pingu Database Schema
 
 -- Users table to store Discord user information and GitHub tokens
 CREATE TABLE IF NOT EXISTS users (

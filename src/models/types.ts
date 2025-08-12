@@ -1,4 +1,4 @@
-// Core data model interfaces for the GitHub Label Notifier
+// Core data model interfaces for Pingu
 
 export interface User {
   id: string; // Discord user ID

@@ -70,7 +70,7 @@ export class WebhookServer {
     // Root health check
     this.app.get('/', (_req, res) => {
       res.json({
-        service: 'GitHub Label Notifier Webhook Server',
+        service: 'Pingu Webhook Server',
         status: 'running',
         timestamp: new Date().toISOString(),
         version: '1.0.0'
@@ -78,10 +78,27 @@ export class WebhookServer {
     });
 
     // Mount webhook routes
-    this.app.use(this.config.basePath, this.webhookHandler.createRouter());
+    console.log('Mounting webhook routes with basePath:', this.config.basePath);
+    try {
+      const router = this.webhookHandler.createRouter();
+      console.log('Router created successfully, now mounting...');
+      
+      // Try mounting without basePath first to isolate the issue
+      if (this.config.basePath === '/api') {
+        console.log('Mounting with /api basePath...');
+        this.app.use('/api', router);
+      } else {
+        console.log('Mounting with custom basePath:', this.config.basePath);
+        this.app.use(this.config.basePath, router);
+      }
+      console.log('Router mounted successfully');
+    } catch (error) {
+      console.error('Error mounting webhook routes:', error);
+      throw error;
+    }
 
-    // 404 handler
-    this.app.use('*', (_req, res) => {
+    // 404 handler - use a function instead of '*' pattern
+    this.app.use((_req, res) => {
       res.status(404).json({
         success: false,
         error: 'Endpoint not found'

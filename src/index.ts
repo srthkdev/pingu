@@ -91,14 +91,21 @@ async function main() {
   subscriptionManager.setWebhookManager(webhookManager);
   
   // Initialize webhook handler and server
+  logger.info('Creating webhook handler...');
   const webhookHandler = new WebhookHandler(subscriptionManager, notificationService);
+  logger.info('Creating webhook server...');
   const webhookServer = new WebhookServer(webhookHandler);
+  logger.info('Webhook server created successfully');
   
   // Initialize health endpoints server
+  logger.info('Creating health endpoints server...');
   const healthEndpoints = new HealthEndpoints(appConfig.server.healthPort);
+  logger.info('Health endpoints server created successfully');
   
   // Register commands with Discord API
+  logger.info('Registering Discord commands...');
   await discordClient.registerCommands();
+  logger.info('Discord commands registered successfully');
   
   // Login to Discord
   logger.info('Connecting to Discord...');

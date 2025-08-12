@@ -220,7 +220,7 @@ export class NotificationService {
       .setURL(issue.url)
       .setTimestamp()
       .setFooter({ 
-        text: 'GitHub Label Notifier',
+        text: 'Pingu',
         iconURL: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'
       });
 
@@ -237,7 +237,7 @@ export class NotificationService {
       .setColor(0xdc3545) // Red color for errors
       .setTimestamp()
       .setFooter({ 
-        text: 'GitHub Label Notifier',
+        text: 'Pingu',
         iconURL: 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'
       });
 
